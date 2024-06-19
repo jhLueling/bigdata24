@@ -44,8 +44,7 @@ def geocode_address(eintrag):
 
 # Zähler für erfolgreich geokodierte Adressen
 count = 0
-
-# Liste zum Sammeln der Geokodierungsdaten
+batch_size = 10
 geocoded_entries = []
 
 # Parallelisierung der Geokodierungsanfragen
@@ -57,8 +56,16 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             geocoded_entries.append(geocoded_entry)
             count += 1
             print(f"Geokodierte Adressen: {count}")
+            
+            # Wenn die Batch-Größe erreicht ist, in die Datenbank schreiben
+            if len(geocoded_entries) >= batch_size:
+                requests = [InsertOne(entry) for entry in geocoded_entries]
+                geocoded_collection.bulk_write(requests)
+                geocoded_entries = []  # Batch zurücksetzen
 
-# Batch-Insert in die MongoDB-Sammlung
+# Alle verbleibenden Einträge einfügen
 if geocoded_entries:
     requests = [InsertOne(entry) for entry in geocoded_entries]
     geocoded_collection.bulk_write(requests)
+
+print(f"Geokodierung abgeschlossen: {count} Adressen erfolgreich geokodiert und in die neue MongoDB-Datenbank geschrieben.")
