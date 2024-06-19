@@ -9,10 +9,8 @@ db = client['Bogestra']  # Name der Datenbank mit Adressen
 collection = db['BogestraGrouped']  # Sammlung mit Adressen
 
 # Neue MongoDB-Datenbank/Sammlung für die Geokodierungsantworten
-geocoded_db = client['geocoded_db']
-geocoded_collection = geocoded_db['geocoded_adressen']
-
-adressen = list(collection.find())
+geocoded_db = client['Bogestra']
+geocoded_collection = geocoded_db['BogestraGeocoded']
 
 # Funktion zur Geokodierung einer Adresse
 def geocode_address(eintrag):
@@ -42,30 +40,41 @@ def geocode_address(eintrag):
         print(f"Ein Fehler ist aufgetreten: {e}")
     return None
 
-# Zähler für erfolgreich geokodierte Adressen
-count = 0
-batch_size = 10
-geocoded_entries = []
+# Hauptteil des Codes zur Verarbeitung der Adressen
+def process_addresses():
+    adressen = list(collection.find())
+    
+    # Zähler für erfolgreich geokodierte Adressen
+    total_count = 0
 
-# Parallelisierung der Geokodierungsanfragen
-with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-    future_to_address = {executor.submit(geocode_address, eintrag): eintrag for eintrag in adressen}
-    for future in concurrent.futures.as_completed(future_to_address):
-        geocoded_entry = future.result()
-        if geocoded_entry:
-            geocoded_entries.append(geocoded_entry)
-            count += 1
-            print(f"Geokodierte Adressen: {count}")
-            
-            # Wenn die Batch-Größe erreicht ist, in die Datenbank schreiben
-            if len(geocoded_entries) >= batch_size:
-                requests = [InsertOne(entry) for entry in geocoded_entries]
-                geocoded_collection.bulk_write(requests)
-                geocoded_entries = []  # Batch zurücksetzen
+    batch_size = 10000
+    
+    # Liste zum Sammeln der Geokodierungsdaten
+    geocoded_entries = []
+    
+    # Parallelisierung der Geokodierungsanfragen
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_address = {executor.submit(geocode_address, eintrag): eintrag for eintrag in adressen}
+        for future in concurrent.futures.as_completed(future_to_address):
+            geocoded_entry = future.result()
+            if geocoded_entry:
+                geocoded_entries.append(geocoded_entry)
+                total_count += 1
+                print(f"Geokodierte Adressen: {total_count}")
 
-# Alle verbleibenden Einträge einfügen
-if geocoded_entries:
-    requests = [InsertOne(entry) for entry in geocoded_entries]
-    geocoded_collection.bulk_write(requests)
+                # Wenn die Batch-Größe erreicht ist, in die Datenbank schreiben
+                if len(geocoded_entries) >= batch_size:
+                    requests = [InsertOne(entry) for entry in geocoded_entries]
+                    geocoded_collection.bulk_write(requests)
+                    geocoded_entries = []  # Batch zurücksetzen
+                    print("Geschrieben!!!")
 
-print(f"Geokodierung abgeschlossen: {count} Adressen erfolgreich geokodiert und in die neue MongoDB-Datenbank geschrieben.")
+    # Batch-Insert in die MongoDB-Sammlung
+    if geocoded_entries:
+        requests = [InsertOne(entry) for entry in geocoded_entries]
+        geocoded_collection.bulk_write(requests)
+    
+    
+    print(f"Geokodierung abgeschlossen: {total_count} Adressen erfolgreich geokodiert und in die neue MongoDB-Datenbank geschrieben.")
+
+process_addresses()
